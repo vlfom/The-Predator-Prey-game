@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 class Obstacle:
     """An obstacle class."""
+
     def __init__(self):
         pass
 
@@ -18,10 +19,10 @@ class Prey:
         food_value   The amount energy that predator will earn after eating a single prey.
         spawn_time   The amount of time before prey tries to reproduce offspring.
     """
-    food_value = 3
 
-    def __init__(self):
-        self.spawn_time = Ocean.spawn_rate
+    def __init__(self, food_value=3, spawn_time=7):
+        self.food_value = food_value
+        self.spawn_time = spawn_time
 
     def __str__(self):
         return 'O'
@@ -35,15 +36,13 @@ class Predator:
     """A predator class.
 
     Attributes:
-        vitality     The amount of time before newborn predator dies without food.
         energy       The amount of time before concrete predator dies without food.
         spawn_time   The amount of time before predator tries to reproduce offspring.
     """
-    vitality = 5
 
-    def __init__(self):
-        self.energy = Predator.vitality
-        self.spawn_time = Ocean.spawn_rate
+    def __init__(self, start_energy=5, spawn_time=7):
+        self.energy = start_energy
+        self.spawn_time = spawn_time
 
     def __str__(self):
         return 'X'
@@ -56,6 +55,7 @@ class Predator:
 
 class Cell:
     """Single grid cell wrapper."""
+
     def __init__(self, obj=None):
         self.obj = obj
 
@@ -72,15 +72,19 @@ class Ocean:
         h            Grid height
         w            Grid width
         spawn_rate   The amount of time before new generation is born.
+        _dirs        Possible directions of prey and predators
     """
-    spawn_rate = 7
+    _dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]]
 
-    def __init__(self, h=10, w=10, pred_vitality=5, prey_food_value=5, spawn_rate=7):
+    def __init__(self, h=10, w=10, pred_vitality=5, prey_food_value=5, spawn_rate=7, seed=1337):
         self.h = h
         self.w = w
         self.grid = [[Cell() for _ in range(w)] for _ in range(h)]
-        Predator.vitality = pred_vitality
-        Prey.food_value = prey_food_value
+        self.pred_vitality = pred_vitality
+        self.prey_food_value = prey_food_value
+        self.spawn_rate = spawn_rate
+
+        self._random = random.Random(seed)
 
     def __str__(self):
         s = ''
@@ -96,75 +100,66 @@ class Ocean:
     def __setitem__(self, index, value):
         self.grid[index[0]][index[1]].obj = value
 
+    def generate_prey(self):
+        """Generate new instance of prey"""
+
+        return Prey(self.prey_food_value, self.spawn_rate)
+
+    def generate_predator(self):
+        """Generate new instance of predator"""
+
+        return Predator(self.pred_vitality, self.spawn_rate)
+
     def try_spawn(self, i, j):
         """Try to spawn new-born unit near given ancestor coordinates"""
 
-        for dir_ in [[-1, 0], [1, 0], [0, -1], [0, 1]]:
-            i_ = i + dir_[0]
-            j_ = j + dir_[1]
+        for dir_ in self._random.sample(self._dirs, len(self._dirs)):
+            i_, j_ = i + dir_[0], j + dir_[1]
             if 0 <= i_ < self.h and 0 <= j_ < self.w and \
                self.grid[i_][j_].obj is None:
                 if isinstance(self.grid[i][j].obj, Prey):
                     self.grid[i_][j_].obj = Prey()
-                elif isinstance(self.grid[i][j].obj, Predator):
+                else:
                     self.grid[i_][j_].obj = Predator()
                 return i_, j_
 
     def tick(self):
         """Modify ocean state after single time unit"""
 
-        grid_ = [[0 for _ in range(self.w)] for _ in range(self.h)]
+        grid_ = [[0] * self.w] * self.h
         for i in range(self.h):
             for j in range(self.w):
-                if grid_[i][j] == 0 and isinstance(self.grid[i][j].obj, Predator):
-                    dir_ = random.choice([[-1, 0], [1, 0], [0, -1], [0, 1]])
-                    i_ = i + dir_[0]
-                    j_ = j + dir_[1]
-                    if 0 <= i_ < self.h and 0 <= j_ < self.w and \
-                            not isinstance(self.grid[i_][j_].obj, Predator) and \
-                            not isinstance(self.grid[i_][j_].obj, Obstacle):
+                if grid_[i][j] == 0 and \
+                        (isinstance(self.grid[i][j].obj, Predator) or
+                         isinstance(self.grid[i][j].obj, Prey)):
+                    dir_ = self._random.choice(self._dirs)
 
-                        if isinstance(self.grid[i_][j_].obj, Prey):
-                            self.grid[i][j].obj.energy += Prey.food_value
+                    i_, j_ = i + dir_[0], j + dir_[1]
 
-                        self.grid[i_][j_].obj = self.grid[i][j].obj
-                        self.grid[i][j].obj = None
-                        grid_[i_][j_] = 1
-                    else:
-                        i_ = i
-                        j_ = j
+                    if 0 <= i_ < self.h and 0 <= j_ < self.w:
+                        if isinstance(self.grid[i][j].obj, Predator) and \
+                           isinstance(self.grid[i_][j_].obj, Prey):
+                            self.grid[i][j].obj.energy += self.grid[i_][j_].obj.food_value
+                            self.grid[i_][j_].obj = None
 
-                    self.grid[i_][j_].obj.tick()
+                        if self.grid[i_][j_].obj is None:
+                            self.grid[i_][j_].obj = self.grid[i][j].obj
+                            self.grid[i][j].obj = None
+                            grid_[i_][j_] = 1
+                        else:
+                            i_, j_ = i, j
 
-                    if self.grid[i_][j_].obj.spawn_time == 0:
-                        self.grid[i_][j_].obj.spawn_time = Ocean.spawn_rate
-                        cords = self.try_spawn(i_, j_)
-                        if cords is not None:
-                            grid_[cords[0]][cords[1]] = 1
+                        self.grid[i_][j_].obj.tick()
 
-                    if self.grid[i_][j_].obj.energy == 0:
-                        self.grid[i_][j_].obj = None
+                        if self.grid[i_][j_].obj.spawn_time == 0:
+                            self.grid[i_][j_].obj.spawn_time = self.spawn_rate
+                            cords = self.try_spawn(i_, j_)
+                            if cords is not None:
+                                grid_[cords[0]][cords[1]] = 1
 
-                elif grid_[i][j] == 0 and isinstance(self.grid[i][j].obj, Prey):
-                    dir_ = random.choice([[-1, 0], [1, 0], [0, -1], [0, 1]])
-                    i_ = i + dir_[0]
-                    j_ = j + dir_[1]
-                    if 0 <= i_ < self.h and 0 <= j_ < self.w and \
-                       self.grid[i_][j_].obj is None:
-                        self.grid[i_][j_].obj = self.grid[i][j].obj
-                        self.grid[i][j].obj = None
-                        grid_[i_][j_] = 1
-                    else:
-                        i_ = i
-                        j_ = j
-
-                    self.grid[i_][j_].obj.tick()
-
-                    if self.grid[i_][j_].obj.spawn_time == 0:
-                        self.grid[i_][j_].obj.spawn_time = Ocean.spawn_rate
-                        cords = self.try_spawn(i_, j_)
-                        if cords is not None:
-                            grid_[cords[0]][cords[1]] = 1
+                        if isinstance(self.grid[i_][j_].obj, Predator) and \
+                           self.grid[i_][j_].obj.energy == 0:
+                            self.grid[i_][j_].obj = None
 
     def get_animals_count(self):
         """Get count of prey and predators in ocean"""
@@ -176,34 +171,35 @@ class Ocean:
                     prey_count += 1
                 elif isinstance(self.grid[i][j].obj, Predator):
                     pred_count += 1
+
         return prey_count, pred_count
 
 
-def init_ocean(h, w, pred_vitality, prey_food_value, spawn_rate):
+def init_ocean(h, w, pred_vitality, prey_food_value, spawn_rate, seed):
     """Init ocean with predators in the middle and prey on the borders"""
-    random.seed(2)
 
     # Create new empty Ocean
     ocean = Ocean(h, w,
                   pred_vitality=pred_vitality,
                   prey_food_value=prey_food_value,
-                  spawn_rate=spawn_rate)
+                  spawn_rate=spawn_rate,
+                  seed=seed)
 
     # Put predators in the middle
     for i in range(6):
         for j in range(6):
-            ocean[(ocean.h // 2 - 2 + i, ocean.w // 2 - 2 + j)] = Predator()
+            ocean[(ocean.h // 2 - 2 + i, ocean.w // 2 - 2 + j)] = ocean.generate_predator()
 
     # Put prey on the borders
     for i in range(9):
-        ocean[(0, i)] = Prey()
-        ocean[(i, 0)] = Prey()
-        ocean[(1, i)] = Prey()
-        ocean[(i, 1)] = Prey()
-        ocean[(7, i)] = Prey()
-        ocean[(i, 7)] = Prey()
-        ocean[(8, i)] = Prey()
-        ocean[(i, 8)] = Prey()
+        ocean[(0, i)] = ocean.generate_prey()
+        ocean[(i, 0)] = ocean.generate_prey()
+        ocean[(1, i)] = ocean.generate_prey()
+        ocean[(i, 1)] = ocean.generate_prey()
+        ocean[(7, i)] = ocean.generate_prey()
+        ocean[(i, 7)] = ocean.generate_prey()
+        ocean[(8, i)] = ocean.generate_prey()
+        ocean[(i, 8)] = ocean.generate_prey()
 
     # Put one obstacle in the middle
     ocean[(4, 4)] = Obstacle()
@@ -213,17 +209,29 @@ def init_ocean(h, w, pred_vitality, prey_food_value, spawn_rate):
 
 # Configurations that did well on test phase
 good_configurations = [
-    (2, 2, 5), (2, 3, 7), (2, 6, 5), (6, 2, 7)
+    (4, 12, 13),
+    (5, 3, 14),
+    (5, 11, 12),
+    (6, 3, 12),
+    (6, 7, 8),
+    (8, 5, 13),
+    (8, 8, 12),
+    (9, 2, 11),
+    (10, 14, 12),
+    (11, 8, 10),
+    (13, 6, 11)
 ]
 
 for config in good_configurations:
     ocean = init_ocean(9, 9,
                        pred_vitality=config[0],
                        prey_food_value=config[1],
-                       spawn_rate=config[2])
+                       spawn_rate=config[2],
+                       seed=1337)
+
     prey_counts, pred_counts = [], []
     ocean_history = []
-    for _ in range(500):
+    for _ in range(2000):
         cnt = ocean.get_animals_count()
         prey_counts.append(cnt[0])
         pred_counts.append(cnt[1])
@@ -231,12 +239,12 @@ for config in good_configurations:
         ocean.tick()
 
     config_desc = "predactor_vitality = {:d}, prey_food_value = {:d}, spawn_rate = {:d}".format(
-            config[2], config[1], config[2])
+            config[0], config[1], config[2])
 
     # Display plot with individuals count
     plt.title(config_desc)
-    plt.plot(list(range(500)), prey_counts, label='Prey')
-    plt.plot(list(range(500)), pred_counts, label='Predators')
+    plt.plot(list(range(2000)), prey_counts, label='Prey')
+    plt.plot(list(range(2000)), pred_counts, label='Predators')
     plt.xlabel('Time')
     plt.ylabel('Individuals count')
     plt.legend()
